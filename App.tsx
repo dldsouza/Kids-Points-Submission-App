@@ -1,44 +1,60 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Kid, PurchaseRequest, RequestStatus, Transaction, SyncSettings } from './types';
-import { INITIAL_KIDS } from './constants';
-import KidDashboard from './components/KidDashboard';
-import ParentDashboard from './components/ParentDashboard';
-import Navigation from './components/Navigation';
+import { Kid, PurchaseRequest, RequestStatus, Transaction, SyncSettings } from './types.ts';
+import { INITIAL_KIDS } from './constants.tsx';
+import KidDashboard from './components/KidDashboard.tsx';
+import ParentDashboard from './components/ParentDashboard.tsx';
+import Navigation from './components/Navigation.tsx';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'kid' | 'parent'>('parent');
   const [isSyncing, setIsSyncing] = useState(false);
   
   const STORAGE_KEYS = {
-    KIDS: 'kp_kids_v3',
-    REQUESTS: 'kp_requests_v3',
-    TXS: 'kp_transactions_v3',
-    SETTINGS: 'kp_settings_v3'
+    KIDS: 'kp_kids_v4',
+    REQUESTS: 'kp_requests_v4',
+    TXS: 'kp_transactions_v4',
+    SETTINGS: 'kp_settings_v4'
   };
 
   const [syncSettings, setSyncSettings] = useState<SyncSettings>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    return saved ? JSON.parse(saved) : { 
-      googleSheetUrl: '', 
-      lastSynced: null, 
-      familyId: Math.random().toString(36).substr(2, 6).toUpperCase() 
-    };
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      return saved ? JSON.parse(saved) : { 
+        googleSheetUrl: '', 
+        lastSynced: null, 
+        familyId: Math.random().toString(36).substr(2, 6).toUpperCase() 
+      };
+    } catch (e) {
+      return { googleSheetUrl: '', lastSynced: null, familyId: 'ERR123' };
+    }
   });
 
   const [kids, setKids] = useState<Kid[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.KIDS);
-    return saved ? JSON.parse(saved) : INITIAL_KIDS;
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.KIDS);
+      return saved ? JSON.parse(saved) : INITIAL_KIDS;
+    } catch (e) {
+      return INITIAL_KIDS;
+    }
   });
 
   const [requests, setRequests] = useState<PurchaseRequest[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.TXS);
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.TXS);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
 
   const [activeKidId, setActiveKidId] = useState<string>('1');
@@ -51,11 +67,6 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(syncSettings));
   }, [kids, requests, transactions, syncSettings]);
 
-  /**
-   * PULL DATA
-   * Note: Google Apps Script redirects can cause 'Failed to fetch'.
-   * We use redirect: 'follow' to handle the transition from script.google.com to googleusercontent.com
-   */
   const pullRemoteData = useCallback(async () => {
     if (!syncSettings.googleSheetUrl || !syncSettings.googleSheetUrl.startsWith('http')) return;
     
@@ -63,7 +74,7 @@ const App: React.FC = () => {
     try {
       const url = new URL(syncSettings.googleSheetUrl);
       url.searchParams.append('familyId', syncSettings.familyId);
-      url.searchParams.append('t', Date.now().toString()); // Cache busting
+      url.searchParams.append('t', Date.now().toString());
 
       const response = await fetch(url.toString(), {
         method: 'GET',
@@ -81,17 +92,12 @@ const App: React.FC = () => {
         setSyncSettings(prev => ({ ...prev, lastSynced: Date.now() }));
       }
     } catch (e) {
-      console.warn("Sync Pull Encountered an Issue. This is common if the script isn't published as 'Anyone' or is still deploying.", e);
+      console.warn("Sync Pull Encountered an Issue.", e);
     } finally {
       setIsSyncing(false);
     }
   }, [syncSettings.googleSheetUrl, syncSettings.familyId]);
 
-  /**
-   * PUSH DATA
-   * mode: 'no-cors' is used because Google Apps Script doesn't return CORS headers on POST.
-   * This means we can't read the response, but the data still gets there.
-   */
   const pushRemoteData = useCallback(async (currentKids: Kid[], currentRequests: PurchaseRequest[], currentTxs: Transaction[]) => {
     if (!syncSettings.googleSheetUrl || !syncSettings.googleSheetUrl.startsWith('http')) return;
     
@@ -119,7 +125,7 @@ const App: React.FC = () => {
   useEffect(() => {
     setIsLoaded(true);
     pullRemoteData();
-    const interval = setInterval(pullRemoteData, 60000); // Check for updates every minute
+    const interval = setInterval(pullRemoteData, 60000);
     return () => clearInterval(interval);
   }, [pullRemoteData]);
 
@@ -134,17 +140,10 @@ const App: React.FC = () => {
     };
     setTransactions(prev => {
       const next = [newTx, ...prev];
-      // Note: We use functional updates to ensure we have the latest state for push
-      setKids(currentKids => {
-        setRequests(currentReqs => {
-          pushRemoteData(currentKids, currentReqs, next);
-          return currentReqs;
-        });
-        return currentKids;
-      });
+      pushRemoteData(kids, requests, next);
       return next;
     });
-  }, [pushRemoteData]);
+  }, [kids, requests, pushRemoteData]);
 
   const handleAddPoints = useCallback((kidId: string, amount: number, reason: string) => {
     setKids(prev => {
