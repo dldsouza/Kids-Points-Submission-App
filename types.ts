@@ -18,6 +18,15 @@ export interface Chore {
   category: string;
 }
 
+export interface Transaction {
+  id: string;
+  kidId: string;
+  description: string;
+  amount: number;
+  timestamp: number;
+  type: 'gain' | 'loss';
+}
+
 export interface PurchaseRequest {
   id: string;
   kidId: string;

@@ -1,30 +1,35 @@
 
-import React, { useState, useEffect } from 'react';
-import { Kid, PurchaseRequest, RequestStatus } from '../types';
+import React, { useState, useMemo } from 'react';
+import { Kid, PurchaseRequest, RequestStatus, Transaction } from '../types';
 
 interface Props {
   kid: Kid;
-  chores: any;
   requests: PurchaseRequest[];
-  onCompleteChore: (points: number) => void;
+  transactions: Transaction[];
   onSubmitRequest: (req: Omit<PurchaseRequest, 'id' | 'status' | 'timestamp'>) => void;
 }
 
-const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
+const KidDashboard: React.FC<Props> = ({ kid, requests, transactions, onSubmitRequest }) => {
   const [showRequestForm, setShowRequestForm] = useState(false);
   const [newItem, setNewItem] = useState('');
-  const [newCost, setNewCost] = useState(40);
+  const [dollarAmount, setDollarAmount] = useState(10);
 
   const approved = requests.filter(r => r.status === RequestStatus.APPROVED);
   const pending = requests.filter(r => r.status === RequestStatus.SUBMITTED);
 
-  // Special logic for Bryson's unique goal
   const hasComputerReturns = pending.some(p => p.itemName === "Computer Returns 🏆");
 
+  const calculatedPoints = useMemo(() => {
+    if (dollarAmount <= 0) return 0;
+    const pts = 100.99 * Math.log(dollarAmount) - 102.5;
+    return Math.max(10, Math.round(pts / 5) * 5);
+  }, [dollarAmount]);
+
   const exampleGoals = [
-    { name: "400 Robux", cost: 40, icon: "🎮" },
-    { name: "Movie Night", cost: 40, icon: "🍿" },
-    { name: "Sleepover", cost: 20, icon: "⛺" }
+    { name: "Game Currency", cost: 60, icon: "🎮", label: "~$5" },
+    { name: "$20 Lego Set", cost: 200, icon: "🧱", label: "$20" },
+    { name: "Movie Night", cost: 40, icon: "🍿", label: "Special" },
+    { name: "New Earbuds", cost: 340, icon: "🎧", label: "$80" },
   ];
 
   const handleQuickAdd = (name: string, cost: number) => {
@@ -32,15 +37,21 @@ const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
     setShowRequestForm(false);
   };
 
+  const getThemeColor = () => {
+    return kid.name === "Bryson" ? "bg-red-50" : "bg-blue-50";
+  };
+
+  const getHeaderColor = () => {
+    return kid.name === "Bryson" ? "bg-pink-500" : "bg-blue-500";
+  };
+
   return (
     <div className="space-y-8 animate-in slide-in-from-right duration-500">
       {/* Analytics Card */}
       <section className="bg-white rounded-[2rem] p-8 shadow-xl border border-slate-100 text-center space-y-4 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div>
-        <div className="inline-block relative p-1 bg-slate-50 rounded-full mb-2">
-          <img src={kid.avatar} className="w-24 h-24 rounded-full border-4 border-white shadow-sm object-cover bg-indigo-50" alt={kid.name} />
-          {kid.name === "Remy" && <span className="absolute -bottom-1 -right-1 text-2xl">🤠</span>}
-          {kid.name === "Bryson" && <span className="absolute -bottom-1 -right-1 text-2xl">👺</span>}
+        <div className={`absolute top-0 left-0 w-full h-1 ${getHeaderColor()}`}></div>
+        <div className={`inline-block relative p-2 ${getThemeColor()} rounded-full mb-2`}>
+          <img src={kid.avatar} className="w-24 h-24 rounded-full border-4 border-white shadow-sm object-contain bg-white" alt={kid.name} />
         </div>
         <div>
           <h2 className="text-4xl font-black text-slate-800 tracking-tight">{kid.totalPoints}</h2>
@@ -59,19 +70,44 @@ const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
         </div>
       </section>
 
+      {/* History Log */}
+      <section className="space-y-4">
+        <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter italic">Recent Activity</h3>
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+          <div className="max-h-[300px] overflow-y-auto no-scrollbar">
+            {transactions.length === 0 ? (
+              <div className="p-8 text-center text-slate-300 font-bold text-sm uppercase italic">No history yet</div>
+            ) : (
+              transactions.map((tx, idx) => (
+                <div key={tx.id} className={`p-4 flex items-center justify-between ${idx !== transactions.length - 1 ? 'border-b border-slate-50' : ''}`}>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-slate-700 text-sm">{tx.description}</span>
+                    <span className="text-[9px] text-slate-400 uppercase font-bold">
+                      {new Date(tx.timestamp).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <span className={`font-black text-sm ${tx.amount >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                    {tx.amount >= 0 ? '+' : ''}{tx.amount}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Goals Section */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-black text-slate-800 uppercase tracking-tighter italic">Mission Progress</h3>
           <button 
             onClick={() => setShowRequestForm(true)}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-full text-[10px] font-black uppercase shadow-lg shadow-indigo-100"
+            className={`px-4 py-2 ${getHeaderColor()} text-white rounded-full text-[10px] font-black uppercase shadow-lg`}
           >
             + New Goal
           </button>
         </div>
 
-        {/* Special Bryson Goal Auto-Offer */}
         {kid.name === "Bryson" && !hasComputerReturns && (
           <div className="bg-gradient-to-r from-yellow-400 to-amber-500 p-4 rounded-2xl shadow-lg text-white flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -92,7 +128,7 @@ const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
 
         {pending.length === 0 && (kid.name !== "Bryson" || hasComputerReturns) ? (
           <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center">
-            <p className="text-slate-400 font-bold text-sm">No active missions. Click "New Goal"!</p>
+            <p className="text-slate-400 font-bold text-sm">No active missions.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -111,12 +147,6 @@ const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
                       style={{ width: `${progress}%` }}
                     />
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className={`text-[10px] font-black uppercase ${progress >= 100 ? 'text-emerald-500' : 'text-slate-400'}`}>
-                      {progress >= 100 ? 'Mission Ready!' : `${Math.ceil(goal.pointCost - kid.totalPoints)} left`}
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-300 italic">Target: {goal.pointCost}</span>
-                  </div>
                 </div>
               );
             })}
@@ -128,64 +158,66 @@ const KidDashboard: React.FC<Props> = ({ kid, requests, onSubmitRequest }) => {
       {showRequestForm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-8 animate-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-black text-slate-800 mb-6 text-center uppercase tracking-tighter">Choose Your Reward</h3>
+            <h3 className="text-xl font-black text-slate-800 mb-6 text-center uppercase tracking-tighter">Request a Goal</h3>
             
             <div className="grid grid-cols-1 gap-2 mb-6">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center mb-2">Quick Examples</p>
-              {exampleGoals.map(ex => (
-                <button 
-                  key={ex.name}
-                  onClick={() => handleQuickAdd(ex.name, ex.cost)}
-                  className="bg-slate-50 p-4 rounded-2xl flex items-center justify-between border border-transparent hover:border-indigo-100 active:bg-indigo-50 transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl">{ex.icon}</span>
-                    <span className="font-bold text-slate-700 text-sm">{ex.name}</span>
-                  </div>
-                  <span className="text-xs font-black text-indigo-600">{ex.cost} Pts</span>
-                </button>
-              ))}
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Standard Goals</p>
+              <div className="grid grid-cols-2 gap-2">
+                {exampleGoals.map(ex => (
+                  <button 
+                    key={ex.name}
+                    onClick={() => handleQuickAdd(ex.name, ex.cost)}
+                    className="bg-slate-50 p-3 rounded-2xl flex flex-col items-center justify-center border border-transparent hover:border-indigo-100 active:bg-indigo-50 transition-all text-center gap-1"
+                  >
+                    <span className="text-xl">{ex.icon}</span>
+                    <p className="font-bold text-slate-700 text-[10px] leading-tight">{ex.name}</p>
+                    <span className="text-[9px] font-black text-indigo-600">{ex.cost} Pts</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="relative flex items-center mb-6">
-              <div className="flex-grow border-t border-slate-100"></div>
-              <span className="flex-shrink mx-4 text-[10px] font-black text-slate-300 uppercase">Or Custom</span>
-              <div className="flex-grow border-t border-slate-100"></div>
-            </div>
-
-            <div className="space-y-4">
+            <div className="space-y-4 pt-4 border-t border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Custom Reward Tool</p>
               <input 
-                placeholder="Name your reward..."
+                placeholder="What is the reward? (e.g. New Toy)"
                 className="w-full p-4 rounded-xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500"
                 value={newItem}
                 onChange={e => setNewItem(e.target.value)}
               />
-              <div className="space-y-2">
-                <div className="flex justify-between text-[10px] font-black uppercase text-slate-400">
-                  <span>Points</span>
-                  <span className="text-indigo-600">{newCost}</span>
+              
+              <div className="bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
+                <div className="flex justify-between text-xs font-black mb-4 uppercase">
+                  <span className="text-indigo-400 tracking-tighter">Value: ${dollarAmount}</span>
+                  <span className="text-indigo-600">{calculatedPoints} Pts</span>
                 </div>
                 <input 
-                  type="range" min="10" max="1000" step="10"
-                  className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                  value={newCost}
-                  onChange={e => setNewCost(parseInt(e.target.value))}
+                  type="range" min="1" max="1000" step="1" 
+                  className="w-full h-2 bg-indigo-100 rounded-lg appearance-none cursor-pointer accent-indigo-600 mb-2"
+                  value={dollarAmount}
+                  onChange={(e) => setDollarAmount(parseInt(e.target.value))}
                 />
+                <div className="flex justify-between text-[8px] text-indigo-300 font-bold uppercase px-1">
+                  <span>$1</span>
+                  <span>$500</span>
+                  <span>$1k</span>
+                </div>
+                <p className="text-[9px] text-indigo-400 text-center font-bold uppercase tracking-widest italic mt-2">Points scale steeply for high-value items</p>
               </div>
-              <div className="flex gap-2 pt-4">
-                <button onClick={() => setShowRequestForm(false)} className="flex-1 py-4 text-slate-400 font-bold uppercase text-xs">Close</button>
-                <button 
-                  onClick={() => {
-                    if(!newItem) return;
-                    onSubmitRequest({ kidId: kid.id, itemName: newItem, pointCost: newCost });
-                    setShowRequestForm(false);
-                    setNewItem('');
-                  }}
-                  className="flex-2 px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg shadow-indigo-100"
-                >
-                  Create
-                </button>
-              </div>
+
+              <button 
+                onClick={() => {
+                  if(!newItem) return;
+                  onSubmitRequest({ kidId: kid.id, itemName: newItem, pointCost: calculatedPoints });
+                  setShowRequestForm(false);
+                  setNewItem('');
+                  setDollarAmount(10);
+                }}
+                className={`w-full py-4 ${getHeaderColor()} text-white rounded-2xl font-black uppercase text-xs shadow-lg`}
+              >
+                Submit Request
+              </button>
+              <button onClick={() => setShowRequestForm(false)} className="w-full text-slate-400 font-bold uppercase text-xs">Cancel</button>
             </div>
           </div>
         </div>

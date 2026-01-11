@@ -1,34 +1,68 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Kid, PurchaseRequest, RequestStatus } from './types';
-import { INITIAL_KIDS, CHORE_LIBRARY } from './constants';
+import { Kid, PurchaseRequest, RequestStatus, Transaction } from './types';
+import { INITIAL_KIDS } from './constants';
 import KidDashboard from './components/KidDashboard';
 import ParentDashboard from './components/ParentDashboard';
 import Navigation from './components/Navigation';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'kid' | 'parent'>('parent');
-  const [kids, setKids] = useState<Kid[]>(INITIAL_KIDS);
-  const [requests, setRequests] = useState<PurchaseRequest[]>([]);
-  const [activeKidId, setActiveKidId] = useState<string>(INITIAL_KIDS[0].id);
+  
+  // Use lazy initialization to read from localStorage immediately
+  const [kids, setKids] = useState<Kid[]>(() => {
+    const saved = localStorage.getItem('kp_kids');
+    return saved ? JSON.parse(saved) : INITIAL_KIDS;
+  });
 
-  useEffect(() => {
-    const savedKids = localStorage.getItem('kp_kids');
-    const savedRequests = localStorage.getItem('kp_requests');
-    if (savedKids) setKids(JSON.parse(savedKids));
-    if (savedRequests) setRequests(JSON.parse(savedRequests));
-  }, []);
+  const [requests, setRequests] = useState<PurchaseRequest[]>(() => {
+    const saved = localStorage.getItem('kp_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
 
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    const saved = localStorage.getItem('kp_transactions');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  const [activeKidId, setActiveKidId] = useState<string>('1');
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  // Sync to localStorage whenever state changes
   useEffect(() => {
     localStorage.setItem('kp_kids', JSON.stringify(kids));
-    localStorage.setItem('kp_requests', JSON.stringify(requests));
-  }, [kids, requests]);
+  }, [kids]);
 
-  const handleAddPoints = useCallback((kidId: string, amount: number) => {
+  useEffect(() => {
+    localStorage.setItem('kp_requests', JSON.stringify(requests));
+  }, [requests]);
+
+  useEffect(() => {
+    localStorage.setItem('kp_transactions', JSON.stringify(transactions));
+  }, [transactions]);
+
+  useEffect(() => {
+    setIsLoaded(true);
+  }, []);
+
+  const addTransaction = useCallback((kidId: string, description: string, amount: number) => {
+    const newTx: Transaction = {
+      id: Math.random().toString(36).substr(2, 9),
+      kidId,
+      description,
+      amount,
+      timestamp: Date.now(),
+      type: amount >= 0 ? 'gain' : 'loss'
+    };
+    setTransactions(prev => [newTx, ...prev]);
+  }, []);
+
+  const handleAddPoints = useCallback((kidId: string, amount: number, reason: string) => {
     setKids(prev => prev.map(k => 
       k.id === kidId ? { ...k, totalPoints: Math.max(0, k.totalPoints + amount) } : k
     ));
-  }, []);
+    addTransaction(kidId, reason, amount);
+  }, [addTransaction]);
 
   const handleSubmitRequest = useCallback((request: Omit<PurchaseRequest, 'id' | 'status' | 'timestamp'>) => {
     const newRequest: PurchaseRequest = {
@@ -48,12 +82,15 @@ const App: React.FC = () => {
       setKids(prev => prev.map(k => 
         k.id === request.kidId ? { ...k, totalPoints: Math.max(0, k.totalPoints - request.pointCost) } : k
       ));
+      addTransaction(request.kidId, `Purchased: ${request.itemName}`, -request.pointCost);
     }
 
     setRequests(prev => prev.map(r => 
       r.id === requestId ? { ...r, status } : r
     ));
-  }, [requests]);
+  }, [requests, addTransaction]);
+
+  if (!isLoaded) return null;
 
   const activeKid = kids.find(k => k.id === activeKidId) || kids[0];
 
@@ -89,15 +126,15 @@ const App: React.FC = () => {
           <ParentDashboard 
             kids={kids}
             requests={requests}
+            transactions={transactions}
             onAddPoints={handleAddPoints}
             onProcessRequest={handleProcessRequest}
           />
         ) : (
           <KidDashboard 
             kid={activeKid} 
-            chores={CHORE_LIBRARY} 
             requests={requests.filter(r => r.kidId === activeKid.id)}
-            onCompleteChore={(points) => handleAddPoints(activeKid.id, points)}
+            transactions={transactions.filter(t => t.kidId === activeKid.id)}
             onSubmitRequest={handleSubmitRequest}
           />
         )}
