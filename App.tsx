@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Kid, PurchaseRequest, RequestStatus, Transaction } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Kid, PurchaseRequest, RequestStatus, Transaction, SyncSettings } from './types';
 import { INITIAL_KIDS } from './constants';
 import KidDashboard from './components/KidDashboard';
 import ParentDashboard from './components/ParentDashboard';
@@ -8,42 +8,98 @@ import Navigation from './components/Navigation';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'kid' | 'parent'>('parent');
+  const [isSyncing, setIsSyncing] = useState(false);
   
-  // Use lazy initialization to read from localStorage immediately
+  const STORAGE_KEYS = {
+    KIDS: 'kp_kids_v3',
+    REQUESTS: 'kp_requests_v3',
+    TXS: 'kp_transactions_v3',
+    SETTINGS: 'kp_settings_v3'
+  };
+
+  // State initialization
+  const [syncSettings, setSyncSettings] = useState<SyncSettings>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    return saved ? JSON.parse(saved) : { googleSheetUrl: '', lastSynced: null, familyId: Math.random().toString(36).substr(2, 6).toUpperCase() };
+  });
+
   const [kids, setKids] = useState<Kid[]>(() => {
-    const saved = localStorage.getItem('kp_kids');
+    const saved = localStorage.getItem(STORAGE_KEYS.KIDS);
     return saved ? JSON.parse(saved) : INITIAL_KIDS;
   });
 
   const [requests, setRequests] = useState<PurchaseRequest[]>(() => {
-    const saved = localStorage.getItem('kp_requests');
+    const saved = localStorage.getItem(STORAGE_KEYS.REQUESTS);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('kp_transactions');
+    const saved = localStorage.getItem(STORAGE_KEYS.TXS);
     return saved ? JSON.parse(saved) : [];
   });
 
   const [activeKidId, setActiveKidId] = useState<string>('1');
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Sync to localStorage whenever state changes
+  // Persistence to LocalStorage
   useEffect(() => {
-    localStorage.setItem('kp_kids', JSON.stringify(kids));
-  }, [kids]);
+    localStorage.setItem(STORAGE_KEYS.KIDS, JSON.stringify(kids));
+    localStorage.setItem(STORAGE_KEYS.REQUESTS, JSON.stringify(requests));
+    localStorage.setItem(STORAGE_KEYS.TXS, JSON.stringify(transactions));
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(syncSettings));
+  }, [kids, requests, transactions, syncSettings]);
 
-  useEffect(() => {
-    localStorage.setItem('kp_requests', JSON.stringify(requests));
-  }, [requests]);
+  // Sync Engine: Pull data from remote source
+  const pullRemoteData = useCallback(async () => {
+    if (!syncSettings.googleSheetUrl) return;
+    setIsSyncing(true);
+    try {
+      const response = await fetch(`${syncSettings.googleSheetUrl}?familyId=${syncSettings.familyId}`);
+      const data = await response.json();
+      if (data) {
+        if (data.kids) setKids(data.kids);
+        if (data.requests) setRequests(data.requests);
+        if (data.transactions) setTransactions(data.transactions);
+        setSyncSettings(prev => ({ ...prev, lastSynced: Date.now() }));
+      }
+    } catch (e) {
+      console.error("Sync Pull Failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [syncSettings.googleSheetUrl, syncSettings.familyId]);
 
-  useEffect(() => {
-    localStorage.setItem('kp_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+  // Sync Engine: Push data to remote source
+  const pushRemoteData = useCallback(async (currentKids: Kid[], currentRequests: PurchaseRequest[], currentTxs: Transaction[]) => {
+    if (!syncSettings.googleSheetUrl) return;
+    setIsSyncing(true);
+    try {
+      await fetch(syncSettings.googleSheetUrl, {
+        method: 'POST',
+        mode: 'no-cors', // Apps Script requires no-cors for simple posts
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          familyId: syncSettings.familyId,
+          kids: currentKids,
+          requests: currentRequests,
+          transactions: currentTxs
+        })
+      });
+      setSyncSettings(prev => ({ ...prev, lastSynced: Date.now() }));
+    } catch (e) {
+      console.error("Sync Push Failed", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [syncSettings.googleSheetUrl, syncSettings.familyId]);
 
+  // Initial load and periodic sync
   useEffect(() => {
     setIsLoaded(true);
-  }, []);
+    pullRemoteData();
+    const interval = setInterval(pullRemoteData, 30000); // Sync every 30 seconds
+    return () => clearInterval(interval);
+  }, [pullRemoteData]);
 
   const addTransaction = useCallback((kidId: string, description: string, amount: number) => {
     const newTx: Transaction = {
@@ -54,14 +110,21 @@ const App: React.FC = () => {
       timestamp: Date.now(),
       type: amount >= 0 ? 'gain' : 'loss'
     };
-    setTransactions(prev => [newTx, ...prev]);
-  }, []);
+    setTransactions(prev => {
+      const next = [newTx, ...prev];
+      pushRemoteData(kids, requests, next);
+      return next;
+    });
+  }, [kids, requests, pushRemoteData]);
 
   const handleAddPoints = useCallback((kidId: string, amount: number, reason: string) => {
-    setKids(prev => prev.map(k => 
-      k.id === kidId ? { ...k, totalPoints: Math.max(0, k.totalPoints + amount) } : k
-    ));
-    addTransaction(kidId, reason, amount);
+    setKids(prev => {
+      const next = prev.map(k => 
+        k.id === kidId ? { ...k, totalPoints: Math.max(0, k.totalPoints + amount) } : k
+      );
+      addTransaction(kidId, reason, amount);
+      return next;
+    });
   }, [addTransaction]);
 
   const handleSubmitRequest = useCallback((request: Omit<PurchaseRequest, 'id' | 'status' | 'timestamp'>) => {
@@ -71,24 +134,32 @@ const App: React.FC = () => {
       status: RequestStatus.SUBMITTED,
       timestamp: Date.now()
     };
-    setRequests(prev => [newRequest, ...prev]);
-  }, []);
+    setRequests(prev => {
+      const next = [newRequest, ...prev];
+      pushRemoteData(kids, next, transactions);
+      return next;
+    });
+  }, [kids, transactions, pushRemoteData]);
 
   const handleProcessRequest = useCallback((requestId: string, status: RequestStatus) => {
     const request = requests.find(r => r.id === requestId);
     if (!request) return;
 
+    let updatedKids = kids;
     if (status === RequestStatus.APPROVED) {
-      setKids(prev => prev.map(k => 
+      updatedKids = kids.map(k => 
         k.id === request.kidId ? { ...k, totalPoints: Math.max(0, k.totalPoints - request.pointCost) } : k
-      ));
-      addTransaction(request.kidId, `Purchased: ${request.itemName}`, -request.pointCost);
+      );
+      setKids(updatedKids);
+      addTransaction(request.kidId, `Approved Goal: ${request.itemName}`, -request.pointCost);
     }
 
-    setRequests(prev => prev.map(r => 
-      r.id === requestId ? { ...r, status } : r
-    ));
-  }, [requests, addTransaction]);
+    setRequests(prev => {
+      const next = prev.map(r => r.id === requestId ? { ...r, status } : r);
+      pushRemoteData(updatedKids, next, transactions);
+      return next;
+    });
+  }, [kids, requests, transactions, addTransaction, pushRemoteData]);
 
   if (!isLoaded) return null;
 
@@ -99,11 +170,14 @@ const App: React.FC = () => {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 kid-gradient rounded-lg flex items-center justify-center text-white font-black text-xl">K</div>
-            <h1 className="font-black text-lg text-slate-800 tracking-tighter">KidPoint</h1>
+            <div className="w-8 h-8 kid-gradient rounded-lg flex items-center justify-center text-white font-black text-xl shadow-sm">K</div>
+            <h1 className="font-black text-lg text-slate-800 tracking-tighter flex items-center gap-2">
+              KidPoint
+              {isSyncing && <span className="animate-pulse text-indigo-400">☁️</span>}
+            </h1>
           </div>
           {view === 'kid' && (
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-full">
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-full border border-slate-200">
                {kids.map(k => (
                  <button 
                    key={k.id}
@@ -115,9 +189,6 @@ const App: React.FC = () => {
                ))}
             </div>
           )}
-          {view === 'parent' && (
-            <div className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">Entry Tool</div>
-          )}
         </div>
       </header>
 
@@ -127,8 +198,11 @@ const App: React.FC = () => {
             kids={kids}
             requests={requests}
             transactions={transactions}
+            syncSettings={syncSettings}
             onAddPoints={handleAddPoints}
             onProcessRequest={handleProcessRequest}
+            onUpdateSyncSettings={setSyncSettings}
+            onManualSync={pullRemoteData}
           />
         ) : (
           <KidDashboard 

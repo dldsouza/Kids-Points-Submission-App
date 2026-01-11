@@ -10,6 +10,12 @@ export enum RequestStatus {
   REJECTED = 'REJECTED'
 }
 
+export interface SyncSettings {
+  googleSheetUrl: string;
+  lastSynced: number | null;
+  familyId: string;
+}
+
 export interface Chore {
   id: string;
   title: string;

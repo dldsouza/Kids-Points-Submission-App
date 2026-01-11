@@ -1,5 +1,5 @@
 {
   "name": "KidPoint Rewards & Chore Tracker",
-  "description": "A gamified chore management system where kids earn points for tasks and submit purchase requests for rewards, featuring a parent dashboard and kid-friendly interface.",
+  "description": "A local-first chore management system for Bryson and Remy. No API keys required.",
   "requestFramePermissions": []
 }
